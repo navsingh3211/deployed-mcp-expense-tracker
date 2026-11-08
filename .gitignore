@@ -4,3 +4,4 @@ venv
 # expenses.db
 venv
 .venv
+testMcpServer.py

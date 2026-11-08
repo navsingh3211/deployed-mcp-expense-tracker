@@ -1,14 +1,34 @@
+
 from fastmcp import FastMCP
 import os
 import sqlite3
 
-DB_PATH = os.path.join(os.path.dirname(__file__), "expenses.db")
-CATEGORIES_PATH = os.path.join(os.path.dirname(__file__), "categories.json")
+# --------------------------------
+# DATABASE CONFIGURATION
+# --------------------------------
+
+DATA_DIR = os.getenv("DATA_DIR", "/tmp/expense_tracker")
+
+os.makedirs(DATA_DIR, exist_ok=True)
+
+DB_PATH = os.path.join(DATA_DIR, "expenses.db")
+
+CATEGORIES_PATH = os.path.join(
+    os.path.dirname(__file__),
+    "categories.json"
+)
 
 mcp = FastMCP("ExpenseTracker")
 
+
+# --------------------------------
+# DATABASE INITIALIZATION
+# --------------------------------
+
 def init_db():
+
     with sqlite3.connect(DB_PATH) as c:
+
         c.execute("""
             CREATE TABLE IF NOT EXISTS expenses(
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -22,20 +42,54 @@ def init_db():
 
 init_db()
 
+
+# --------------------------------
+# ADD EXPENSE TOOL
+# --------------------------------
+
 @mcp.tool()
-def add_expense(date, amount, category, subcategory="", note=""):
-    '''Add a new expense entry to the database.'''
+def add_expense(
+    date: str,
+    amount: float,
+    category: str,
+    subcategory: str = "",
+    note: str = ""
+):
+    """Add a new expense entry to the database."""
+
+    if not category.strip():
+        raise ValueError("Category cannot be empty")
+
+    if amount <= 0:
+        raise ValueError("Amount must be greater than zero")
+
     with sqlite3.connect(DB_PATH) as c:
+
         cur = c.execute(
-            "INSERT INTO expenses(date, amount, category, subcategory, note) VALUES (?,?,?,?,?)",
+            """
+            INSERT INTO expenses
+            (date, amount, category, subcategory, note)
+            VALUES (?, ?, ?, ?, ?)
+            """,
             (date, amount, category, subcategory, note)
         )
-        return {"status": "ok", "id": cur.lastrowid}
-    
+
+        return {
+            "status": "ok",
+            "id": cur.lastrowid
+        }
+
+
+# --------------------------------
+# LIST EXPENSES TOOL
+# --------------------------------
+
 @mcp.tool()
-def list_expenses(start_date, end_date):
-    '''List expense entries within an inclusive date range.'''
+def list_expenses(start_date: str, end_date: str):
+    """List expense entries within an inclusive date range."""
+
     with sqlite3.connect(DB_PATH) as c:
+
         cur = c.execute(
             """
             SELECT id, date, amount, category, subcategory, note
@@ -45,20 +99,35 @@ def list_expenses(start_date, end_date):
             """,
             (start_date, end_date)
         )
+
         cols = [d[0] for d in cur.description]
-        return [dict(zip(cols, r)) for r in cur.fetchall()]
+
+        return [
+            dict(zip(cols, row))
+            for row in cur.fetchall()
+        ]
+
+
+# --------------------------------
+# SUMMARIZE EXPENSES TOOL
+# --------------------------------
 
 @mcp.tool()
-def summarize(start_date, end_date, category=None):
-    '''Summarize expenses by category within an inclusive date range.'''
+def summarize(
+    start_date: str,
+    end_date: str,
+    category: str | None = None
+):
+    """Summarize expenses by category within an inclusive date range."""
+
     with sqlite3.connect(DB_PATH) as c:
-        query = (
-            """
+
+        query = """
             SELECT category, SUM(amount) AS total_amount
             FROM expenses
             WHERE date BETWEEN ? AND ?
-            """
-        )
+        """
+
         params = [start_date, end_date]
 
         if category:
@@ -68,15 +137,38 @@ def summarize(start_date, end_date, category=None):
         query += " GROUP BY category ORDER BY category ASC"
 
         cur = c.execute(query, params)
-        cols = [d[0] for d in cur.description]
-        return [dict(zip(cols, r)) for r in cur.fetchall()]
 
-@mcp.resource("expense://categories", mime_type="application/json")
+        cols = [d[0] for d in cur.description]
+
+        return [
+            dict(zip(cols, row))
+            for row in cur.fetchall()
+        ]
+
+
+# --------------------------------
+# CATEGORIES RESOURCE
+# --------------------------------
+
+@mcp.resource(
+    "expense://categories",
+    mime_type="application/json"
+)
 def categories():
-    # Read fresh each time so you can edit the file without restarting
+    """Read available expense categories."""
+
     with open(CATEGORIES_PATH, "r", encoding="utf-8") as f:
         return f.read()
 
-#start server
+
+# --------------------------------
+# START MCP SERVER
+# --------------------------------
+
 if __name__ == "__main__":
-    mcp.run(transport="http",host="0.0.0.0",port=8000)
+
+    mcp.run(
+        transport="http",
+        host="0.0.0.0",
+        port=8000
+    )
